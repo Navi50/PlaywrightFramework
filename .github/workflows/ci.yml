@@ -1,0 +1,94 @@
+name: Java Test Matrix
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [18, 20]
+        browser: [chromium, firefox, webkit]
+    runs-on: ${{ matrix.os }}
+    env:
+      BROWSER: ${{ matrix.browser }}
+      NODE_VERSION: ${{ matrix.node }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Cache Maven repo
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+
+      - name: Cache Node modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        run: mvn install -DskipTests
+
+      - name: Install Playwright browsers
+        run: npx playwright install
+
+      - name: Run tests (with retries)
+        run: |
+          for i in {1..3}; do
+            if mvn test -Dbrowser=${BROWSER}; then
+              break
+            fi
+            echo "Test run failed, retrying ($i)..."
+            sleep 10
+          done
+
+      - name: Generate Coverage Summary
+        run: |
+          # Example uses Jacoco; ensure your Maven build creates jacoco.xml
+          # Adapt with your actual coverage tool if needed
+          mvn jacoco:report
+
+      - name: Check Coverage (fail if <80%)
+        run: |
+          COVERAGE=$(grep '<counter type="LINE"' target/site/jacoco/jacoco.xml | grep -oP 'missed="\K[0-9]+' | paste -sd+ | bc)
+          TOTAL=$(grep '<counter type="LINE"' target/site/jacoco/jacoco.xml | grep -oP 'covered="\K[0-9]+' | paste -sd+ | bc)
+          PERCENT=$((100 * TOTAL / (TOTAL + COVERAGE)))
+          echo "Line Coverage: $PERCENT%"
+          if [ "$PERCENT" -lt 80 ]; then
+            echo "Coverage is less than 80%, failing job."
+            exit 1
+          fi
+
+      - name: Send notification email
+        if: always()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.example.com
+          server_port: 587
+          username: ${{ secrets.SMTP_USERNAME }}
+          password: ${{ secrets.SMTP_PASSWORD }}
+          subject: "CI Status: ${{ github.job }} ${{ job.status }} for ${{ matrix.os }} ${{ matrix.node }} ${{ matrix.browser }}"
+          to: team@example.com
+          body: |
+            Job Status: ${{ job.status }}
+            Branch: ${{ github.ref }}
+            Commit: ${{ github.sha }}
+            See attached report for details.
