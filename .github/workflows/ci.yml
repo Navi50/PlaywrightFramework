@@ -52,13 +52,15 @@ jobs:
 
       - name: Run tests (with retries)
         run: |
-          for i in {1..3}; do
-            if mvn test -Dbrowser=${BROWSER}; then
-              break
-            fi
-            echo "Test run failed, retrying ($i)..."
-            sleep 10
+          n=0
+          until [ "$n" -ge 3 ]
+          do
+          mvn test -Dbrowser=${BROWSER} && break
+          n=$((n+1))
+          echo "Retry #$n..."
+          sleep 10
           done
+        shell: bash
 
 #      - name: Generate Coverage Summary
 #        run: |
